@@ -14,6 +14,7 @@ const removeFileBtn = document.getElementById("removeFileBtn");
 const chatArea = document.getElementById("chatArea");
 const chatMessages = document.getElementById("chatMessages");
 const welcomeScreen = document.getElementById("welcomeScreen");
+const suggestionCards = document.querySelectorAll(".suggestion-card");
 
 // --- STATE VARIABLES ---
 let selectedFile = null;
@@ -25,7 +26,8 @@ let conversationHistory = [];
 
 // --- GENERATE STARS ---
 if (stars) {
-    for (let i = 0; i < 70; i++) {
+    const starCount = window.innerWidth < 768 ? 40 : 70;
+    for (let i = 0; i < starCount; i++) {
         const star = document.createElement("div");
         star.className = "star";
         const size = Math.random() * 2 + 1;
@@ -38,6 +40,27 @@ if (stars) {
         stars.appendChild(star);
     }
 }
+
+// --- SUGGESTION CARDS LOGIC ---
+suggestionCards.forEach(card => {
+    card.addEventListener("click", () => {
+        const title = card.querySelector(".s-title").textContent;
+        let prompt = "";
+        
+        switch(title) {
+            case "Explain Code": prompt = "Explain this code snippet line by line:"; break;
+            case "Debug Error": prompt = "Help me debug this error:"; break;
+            case "Optimize Code": prompt = "Optimize this code for better performance:"; break;
+            case "Learn Concept": prompt = "Explain the concept of:"; break;
+        }
+        
+        msgInput.value = prompt;
+        msgInput.focus();
+        // Adjust height after setting value
+        msgInput.style.height = "auto";
+        msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + "px";
+    });
+});
 
 // --- AUTO TEXTAREA HEIGHT ---
 if (msgInput) {
@@ -53,6 +76,13 @@ if (msgInput) {
         }
     });
 }
+
+// --- MOBILE KEYBOARD ADAPTATION ---
+window.visualViewport?.addEventListener('resize', () => {
+    if (chatArea) {
+        scrollToBottom();
+    }
+});
 
 // --- FILE ATTACHMENT LOGIC ---
 if (attachBtn) attachBtn.addEventListener("click", () => fileInput.click());
@@ -120,7 +150,6 @@ async function sendMessage() {
         if (isTextFile && textFileContent) {
             userMessageContent += `\n\n--- Content of ${selectedFile.name} ---\n${textFileContent}`;
         } else if (fileBase64 && fileMimeType) {
-            // Groq supports vision with llama-4 models
             conversationHistory.push({
                 role: "user",
                 content: [
@@ -137,7 +166,6 @@ async function sendMessage() {
         }
     }
 
-    // Add to conversation history (keeps memory of past messages)
     conversationHistory.push({ role: "user", content: userMessageContent });
     resetFileState();
     await callGroqAPI();
@@ -156,7 +184,7 @@ async function callGroqAPI() {
             body: JSON.stringify({
                 model: "llama-3.3-70b-versatile",
                 messages: [
-                    { role: "system", content: "You are a helpful AI tutor. Answer clearly and concisely. Use simple language and examples when explaining concepts." },
+                    { role: "system", content: "You are a helpful AI tutor. Answer clearly and concisely. Use simple language and examples when explaining concepts. Use markdown for code blocks." },
                     ...conversationHistory
                 ],
                 temperature: 0.7,
@@ -167,19 +195,15 @@ async function callGroqAPI() {
         const data = await response.json();
 
         if (data.error) {
-            console.log("Full error:", JSON.stringify(data.error));
-            aiBubble.innerHTML = `Error: ${data.error.message} (Code: ${data.error.code})`;
-            // Remove failed message from history
+            aiBubble.innerHTML = `Error: ${data.error.message}`;
             conversationHistory.pop();
             return;
         }
 
         const aiText = data.choices[0].message.content;
-
-        // Add AI response to conversation history
         conversationHistory.push({ role: "assistant", content: aiText });
 
-        // Format response
+        // Simple Markdown-like formatter
         const formattedText = aiText
             .replace(/```(\w+)?\n?([\s\S]*?)```/g, "<pre><code>$2</code></pre>")
             .replace(/`([^`]+)`/g, "<code>$1</code>")
@@ -188,15 +212,24 @@ async function callGroqAPI() {
             .replace(/\n/g, "<br>");
 
         aiBubble.innerHTML = formattedText;
+        scrollToBottom();
 
     } catch (error) {
-        console.log("Catch error:", error);
         aiBubble.innerHTML = `Connection Error: Failed to reach Groq.`;
         conversationHistory.pop();
     }
 }
 
-// --- UI HELPER: APPEND MESSAGE BUBBLE ---
+// --- UI HELPERS ---
+function scrollToBottom() {
+    if (chatArea) {
+        chatArea.scrollTo({
+            top: chatArea.scrollHeight,
+            behavior: "smooth"
+        });
+    }
+}
+
 function appendMessage(sender, text, isHtml = false) {
     const msgDiv = document.createElement("div");
     msgDiv.classList.add("message-box");
@@ -213,14 +246,11 @@ function appendMessage(sender, text, isHtml = false) {
         }
     }
 
-    if (chatMessages) chatMessages.appendChild(msgDiv);
-
-    if (chatArea) {
-        chatArea.scrollTo({
-            top: chatArea.scrollHeight,
-            behavior: "smooth"
-        });
+    if (chatMessages) {
+        chatMessages.appendChild(msgDiv);
+        scrollToBottom();
     }
 
     return msgDiv;
 }
+
