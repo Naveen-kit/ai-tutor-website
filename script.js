@@ -22,7 +22,11 @@ let fileBase64 = null;
 let fileMimeType = null;
 let isTextFile = false;
 let textFileContent = null;
-let conversationHistory = [];
+
+// --- ADVANCED PERSISTENT MEMORY (HIDDEN) ---
+// We load the history but DO NOT render it to the UI (Rule 5 & 6)
+let conversationHistory = JSON.parse(localStorage.getItem("ai_tutor_hidden_history") || "[]");
+let userFacts = JSON.parse(localStorage.getItem("ai_tutor_hidden_facts") || "{}");
 
 // --- GENERATE STARS ---
 if (stars) {
@@ -56,18 +60,13 @@ suggestionCards.forEach(card => {
         
         msgInput.value = prompt;
         msgInput.focus();
-        // Adjust height after setting value
-        msgInput.style.height = "auto";
-        msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + "px";
+        adjustTextareaHeight();
     });
 });
 
 // --- AUTO TEXTAREA HEIGHT ---
 if (msgInput) {
-    msgInput.addEventListener("input", function () {
-        this.style.height = "auto";
-        this.style.height = Math.min(this.scrollHeight, 120) + "px";
-    });
+    msgInput.addEventListener("input", adjustTextareaHeight);
 
     msgInput.addEventListener("keydown", function (e) {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -75,6 +74,11 @@ if (msgInput) {
             sendMessage();
         }
     });
+}
+
+function adjustTextareaHeight() {
+    msgInput.style.height = "auto";
+    msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + "px";
 }
 
 // --- MOBILE KEYBOARD ADAPTATION ---
@@ -134,16 +138,37 @@ async function sendMessage() {
     const text = msgInput.value.trim();
     if (!text && !selectedFile) return;
 
+    // Detect explicit reset commands (Rule 3)
+    const lowerText = text.toLowerCase();
+    if (lowerText === "forget" || lowerText === "reset memory" || lowerText === "clear memory") {
+        conversationHistory = [];
+        userFacts = {};
+        localStorage.removeItem("ai_tutor_hidden_history");
+        localStorage.removeItem("ai_tutor_hidden_facts");
+        chatMessages.innerHTML = "";
+        chatMessages.style.display = "none";
+        welcomeScreen.style.display = "flex";
+        msgInput.value = "";
+        adjustTextareaHeight();
+        return;
+    }
+
     if (welcomeScreen && welcomeScreen.style.display !== "none") {
         welcomeScreen.style.display = "none";
         chatMessages.style.display = "flex";
     }
 
-    appendMessage("user", text || `[Attached File: ${selectedFile.name}]`);
-    msgInput.value = "";
-    msgInput.style.height = "auto";
+    // Rule 12: Capture name permanently
+    const nameMatch = text.match(/my name is (.*)/i);
+    if (nameMatch) {
+        userFacts.name = nameMatch[1].trim().replace(/[.!?]$/, "");
+        localStorage.setItem("ai_tutor_hidden_facts", JSON.stringify(userFacts));
+    }
 
-    // Build user message content
+    appendMessageUI("user", text || `[Attached File: ${selectedFile.name}]`);
+    msgInput.value = "";
+    adjustTextareaHeight();
+
     let userMessageContent = text || "Analyze the attached file.";
 
     if (selectedFile) {
@@ -161,6 +186,7 @@ async function sendMessage() {
                 ]
             });
             resetFileState();
+            saveHiddenMemory();
             await callGroqAPI();
             return;
         }
@@ -168,11 +194,31 @@ async function sendMessage() {
 
     conversationHistory.push({ role: "user", content: userMessageContent });
     resetFileState();
+    saveHiddenMemory();
     await callGroqAPI();
 }
 
+function saveHiddenMemory() {
+    // Keep only last 20 messages to prevent token overflow, but preserve continuity (Rule 14)
+    if (conversationHistory.length > 20) {
+        conversationHistory = conversationHistory.slice(-20);
+    }
+    localStorage.setItem("ai_tutor_hidden_history", JSON.stringify(conversationHistory));
+}
+
 async function callGroqAPI() {
-    const aiBubble = appendMessage("ai", "<span class='loading-dots'>Thinking...</span>", true);
+    const aiBubble = appendMessageUI("ai", "<span class='loading-dots'>Thinking...</span>", true);
+
+    const memorySystemPrompt = `You are an advanced AI assistant with intelligent long-term memory.
+IMPORTANT BEHAVIOR:
+1. Internally remember all previous conversations and user details.
+2. User Facts: ${JSON.stringify(userFacts)}.
+3. Continuity: Use stored memory SILENTLY and naturally.
+4. Never say "I forgot" or "I don't remember". 
+5. Even if the UI looks fresh, you KNOW the history.
+6. If the user discusses a project, continue helping with it automatically.
+7. Behave like a real AI operating system assistant with long-term memory.
+8. Prioritize contextual awareness and personalization.`;
 
     try {
         const response = await fetch(API_URL, {
@@ -184,7 +230,7 @@ async function callGroqAPI() {
             body: JSON.stringify({
                 model: "llama-3.3-70b-versatile",
                 messages: [
-                    { role: "system", content: "You are a helpful AI tutor. Answer clearly and concisely. Use simple language and examples when explaining concepts. Use markdown for code blocks." },
+                    { role: "system", content: memorySystemPrompt },
                     ...conversationHistory
                 ],
                 temperature: 0.7,
@@ -202,6 +248,7 @@ async function callGroqAPI() {
 
         const aiText = data.choices[0].message.content;
         conversationHistory.push({ role: "assistant", content: aiText });
+        saveHiddenMemory();
 
         // Simple Markdown-like formatter
         const formattedText = aiText
@@ -230,7 +277,7 @@ function scrollToBottom() {
     }
 }
 
-function appendMessage(sender, text, isHtml = false) {
+function appendMessageUI(sender, text, isHtml = false) {
     const msgDiv = document.createElement("div");
     msgDiv.classList.add("message-box");
 
@@ -253,4 +300,3 @@ function appendMessage(sender, text, isHtml = false) {
 
     return msgDiv;
 }
-
