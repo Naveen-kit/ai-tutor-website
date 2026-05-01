@@ -1,5 +1,5 @@
 // --- CONFIGURATION FOR GROQ ---
-const API_KEY = ""; // Replace with your new key
+const API_KEY = "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"; // Replace with your new key
 const API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 // --- DOM ELEMENTS ---
